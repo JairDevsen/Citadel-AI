@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import agrupar, callback, catalogo, fatiar, render, schemas
+from .chat import ChatIn, ChatOut, completar_chat
 from .impressao import impressao_motor
 from .providers import Pedido, obter_provider
 
@@ -263,3 +264,9 @@ def qualidade():
     from .qualidade import executar
 
     return executar(PROVIDER)
+
+
+@app.post("/chat/complete", response_model=ChatOut, dependencies=[Depends(auth)])
+def chat_complete(body: ChatIn):
+    fut = LLM_POOL.submit(completar_chat, PROVIDER, body)
+    return fut.result(timeout=60)
