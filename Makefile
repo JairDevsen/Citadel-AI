@@ -1,4 +1,4 @@
-.PHONY: up down logs pull migrate seed backup restore keys check-secrets install-hooks test lint dev-deps dev web dev-down e2e
+z.PHONY: up down logs pull migrate seed backup restore keys check-secrets install-hooks test lint dev-deps dev web dev-down e2e
 
 up:        ; docker compose up -d
 down:      ; docker compose down

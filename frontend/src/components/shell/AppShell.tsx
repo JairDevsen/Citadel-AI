@@ -8,6 +8,7 @@ import { useGet } from '@/lib/query'
 import { useTheme } from '@/lib/theme'
 import { api } from '@/lib/api'
 import { fmtDateTime } from '@/lib/format'
+import { ChatWidget } from '@/features/chat/ChatWidget'
 import type { NavEntry, NavLink } from './nav'
 import { EntityFinder } from './EntityFinder'
 
@@ -135,6 +136,7 @@ export function AppShell({ nav }: { nav: NavEntry[] }) {
         <main id="conteudo" className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-8"><div className="mx-auto w-full max-w-[1400px]"><Outlet /></div></main>
       </div>
       {drawer && <button className="sr-only" onClick={() => setDrawer(false)}><X /></button>}
+      {tenantUser && <ChatWidget />}
     </div>
   )
 }

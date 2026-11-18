@@ -12,7 +12,16 @@ import threading
 import time
 from collections import deque, OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Dict, List, Optional
+
+from dotenv import load_dotenv
+
+# Carrega a configuração do diretório do serviço antes de importar providers e criar o app.
+# O ambiente do processo tem prioridade, seguido de .env.local e então .env.
+ENV_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ENV_DIR / ".env.local", override=False)
+load_dotenv(ENV_DIR / ".env", override=False)
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
@@ -21,6 +30,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import agrupar, callback, catalogo, fatiar, render, schemas
+from .chat import ChatIn, ChatOut, completar_chat
 from .impressao import impressao_motor
 from .providers import Pedido, obter_provider
 from .telemetria import resumo
@@ -302,3 +312,9 @@ def qualidade():
     from .qualidade import executar
 
     return executar(PROVIDER)
+
+
+@app.post("/chat/complete", response_model=ChatOut, dependencies=[Depends(auth)])
+def chat_complete(body: ChatIn):
+    fut = LLM_POOL.submit(completar_chat, PROVIDER, body)
+    return fut.result(timeout=60)
