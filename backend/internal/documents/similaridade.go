@@ -232,16 +232,12 @@ type Comparacao struct {
 func Comparar(a, b string) Comparacao {
 	pa, va := tokensDoTexto(a)
 	pb, vb := tokensDoTexto(b)
-	nv := len(va)
-	if len(vb) > nv {
-		nv = len(vb)
-	}
 	np := len(pa)
 	if len(pb) < np {
 		np = len(pb)
 	}
 	va, vb = valoresRelevantes(va), valoresRelevantes(vb)
-	nv = len(va)
+	nv := len(va)
 	if len(vb) > nv {
 		nv = len(vb)
 	}

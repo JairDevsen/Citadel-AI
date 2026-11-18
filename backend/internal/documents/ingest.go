@@ -153,7 +153,7 @@ func (i *Ingestor) Ingest(ctx context.Context, tx pgx.Tx, tenantID, batchID stri
 	affected := map[string]bool{}
 	var autoPre bool
 	tx.QueryRow(ctx, `SELECT pre_cadastro_automatico FROM tenants WHERE id=$1`, tenantID).Scan(&autoPre)
-	var limiarDup float64 = 0.85 // similaridade do texto (OCR) acima da qual é o mesmo documento; ajustável pela empresa (0,70 a 1,00)
+	limiarDup := 0.85 // similaridade do texto (OCR) acima da qual é o mesmo documento; ajustável pela empresa (0,70 a 1,00)
 	_ = tx.QueryRow(ctx, `SELECT similaridade_duplicata::float8 FROM tenants WHERE id=$1`, tenantID).Scan(&limiarDup)
 	novosFornecedores := map[string]bool{}
 	var firstDoc string

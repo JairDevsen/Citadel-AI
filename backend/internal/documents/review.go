@@ -531,7 +531,7 @@ func (i *Ingestor) reconcileReviewAlerts(ctx context.Context, tx pgx.Tx, tenantI
 	}
 	cleanNC := make([]map[string]any, 0, len(ncs))
 	for _, nc := range ncs {
-		if str(nc, "codigo") != "CERTIDAO_VENCIDA" && !(signatureSet && str(nc, "codigo") == "DOCUMENTO_SEM_ASSINATURA") {
+		if str(nc, "codigo") != "CERTIDAO_VENCIDA" && (!signatureSet || str(nc, "codigo") != "DOCUMENTO_SEM_ASSINATURA") {
 			cleanNC = append(cleanNC, nc)
 		}
 	}
