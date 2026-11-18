@@ -1,15 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Bot, RotateCcw, Send, ShieldCheck, X } from 'lucide-react'
+import { AlertCircle, RotateCcw, Send, ShieldCheck, X } from 'lucide-react'
 import { clsx } from '@/components/ui'
 import { ApiError, api } from '@/lib/api'
 import type { ChatApiResponse, ChatMessage } from './types'
 
 const sugestoes = [
-  'Qual o resumo geral dos documentos e pendências?',
-  'Quais documentos aguardam revisão humana?',
-  'Existem riscos trabalhistas ou itens vencidos?',
-  'Como funciona o Citadel AI?',
+  'Resumo geral de compliance',
+  'Documentos vencidos ou a vencer',
+  'Pendências de colaboradores',
+  'Riscos abertos no momento',
 ]
+
+function SentinelAvatar({ iconClassName }: { iconClassName: string }) {
+  const [falhou, setFalhou] = useState(false)
+
+  if (falhou) return <ShieldCheck className={iconClassName} aria-hidden />
+
+  return (
+    <img
+      src="/sentinel-avatar.png"
+      alt=""
+      className="h-full w-full scale-[1.8] object-cover"
+      onError={() => setFalhou(true)}
+    />
+  )
+}
 
 function mensagemErro(err: unknown) {
   if (err instanceof ApiError) return err.message
@@ -90,12 +105,11 @@ export function ChatWidget() {
       {!aberto && (
         <button
           type="button"
-          className="fixed bottom-5 right-5 z-30 grid h-14 w-14 place-items-center rounded-full text-white shadow-lg transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-default"
-          style={{ background: 'var(--gradient-brand)' }}
-          aria-label="Abrir Assistente Citadel"
+          className="fixed bottom-5 right-5 z-30 grid h-14 w-14 place-items-center overflow-hidden rounded-full border border-brand-light/80 bg-brand-lighter text-brand-default shadow-lg transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-default"
+          aria-label="Abrir Citadel Sentinel"
           onClick={() => setAberto(true)}
         >
-          <Bot className="h-6 w-6" aria-hidden />
+          <SentinelAvatar iconClassName="h-7 w-7 text-brand-default" />
         </button>
       )}
 
@@ -114,12 +128,12 @@ export function ChatWidget() {
             aria-labelledby="chat-titulo"
           >
             <header className="flex items-center gap-3 border-b border-border bg-brand-50/70 px-4 py-4">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-lighter text-brand-darker">
-                <Bot className="h-5 w-5" aria-hidden />
+              <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-brand-light/70 bg-brand-lighter text-brand-default">
+                <SentinelAvatar iconClassName="h-5 w-5 text-brand-default" />
               </span>
               <div className="min-w-0 flex-1">
-                <h2 id="chat-titulo" className="font-semibold text-brand-darker">Assistente Citadel</h2>
-                <p className="text-xs text-muted-foreground">Consultivo (Nível 2) · Apenas leitura</p>
+                <h2 id="chat-titulo" className="font-semibold text-brand-darker">Citadel Sentinel</h2>
+                <p className="text-xs text-muted-foreground">Assistente Consultivo de Compliance</p>
               </div>
               <button
                 type="button"
@@ -146,16 +160,19 @@ export function ChatWidget() {
                 <div className="flex min-h-full flex-col justify-center">
                   <div className="mb-5 text-center">
                     <ShieldCheck className="mx-auto mb-2 h-8 w-8 text-brand-default" aria-hidden />
-                    <p className="text-sm font-medium text-brand-darker">Como posso ajudar?</p>
+                    <p className="text-sm font-medium text-brand-darker">Olá, sou o Sentinel. Como posso ajudar?</p>
                     <p className="mt-1 text-xs text-muted-foreground">Posso consultar informações da sua empresa em modo somente leitura.</p>
                   </div>
-                  <div className="space-y-2">
+                  <div className="flex flex-wrap justify-center gap-2">
                     {sugestoes.map((sugestao) => (
                       <button
                         key={sugestao}
                         type="button"
-                        className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-left text-sm text-brand-darker transition hover:border-brand-light hover:bg-brand-50"
-                        onClick={() => void enviar(sugestao)}
+                        className="max-w-full rounded-full border border-brand-light/70 bg-brand-lighter/70 px-3.5 py-2 text-left text-xs font-medium leading-snug text-brand-darker transition hover:border-brand-default hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-default sm:text-sm"
+                        onClick={() => {
+                          setTexto(sugestao)
+                          void enviar(sugestao)
+                        }}
                       >
                         {sugestao}
                       </button>

@@ -366,8 +366,8 @@ class GeminiProvider(LLMProvider):
         # 429/5xx passageiros (alta demanda) são tentados de novo com espera crescente antes de a página falhar
         self.client = genai.Client(api_key=api_key, http_options=types.HttpOptions(
             timeout=90_000, retry_options=types.HttpRetryOptions(attempts=4, initial_delay=1.5, max_delay=20.0, http_status_codes=[429, 500, 502, 503, 504])))
-        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-        self.fallback = fallback or os.environ.get("GEMINI_MODEL_FALLBACK", "gemini-3.6-flash")
+        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        self.fallback = fallback or os.environ.get("GEMINI_MODEL_FALLBACK", "gemini-3.5-flash-lite")
         self.lite = os.environ.get("GEMINI_MODEL_LITE", "gemini-3.5-flash-lite")
         self.nome = "gemini:" + self.model
 

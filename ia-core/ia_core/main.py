@@ -10,7 +10,16 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Dict, List, Optional
+
+from dotenv import load_dotenv
+
+# Carrega a configuração do diretório do serviço antes de importar providers e criar o app.
+# O ambiente do processo tem prioridade, seguido de .env.local e então .env.
+ENV_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ENV_DIR / ".env.local", override=False)
+load_dotenv(ENV_DIR / ".env", override=False)
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
