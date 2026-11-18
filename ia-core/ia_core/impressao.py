@@ -8,7 +8,7 @@ import os
 
 # arquivos cujo conteúdo define o resultado da análise de uma página
 _ARQUIVOS = ("catalogo.py", "extracao.py", "validacoes.py", "checklist.py", "providers.py", "orientacao.py", "qualidade_img.py",
-             "paginacao.py", "anonimizacao.py", "agrupar.py", "schemas.py", "roteador.py")
+             "paginacao.py", "anonimizacao.py", "agrupar.py", "schemas.py", "roteador.py", "telemetria.py", "recorte.py", "fatiar.py", "main.py")
 _AQUI = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -22,6 +22,8 @@ def _codigo() -> str:
 
 def impressao_motor(provider) -> str:
     """'provedor:modelo|código' — o que tiver de mudar para uma análise antiga deixar de valer."""
-    ajustes = "|".join(str(getattr(provider, a, "")) for a in ("nome", "model", "fallback", "lite")) + "|" + \
-        os.environ.get("IA_IMAGE_MAX_PX", "") + "|" + os.environ.get("IA_NITIDEZ_MIN", "")
+    ajustes = "|".join(str(getattr(provider, a, "")) for a in ("nome", "model", "fallback", "lite"))
+    ajustes += "|" + "|".join(os.environ.get(k, "") for k in (
+        "IA_IMAGE_MAX_PX", "GEMINI_IMAGE_MAX_PX", "IA_TEXT_MAX_CHARS", "IA_CONF_TIPO_NOVO",
+        "IA_NITIDEZ_MIN", "IA_TINTA_MIN", "IA_TINTA_MARCA", "OPENAI_REASONING_EFFORT", "OPENAI_BASE_URL"))
     return f"{getattr(provider, 'nome', 'motor')}|{hashlib.sha256((ajustes + _codigo()).encode()).hexdigest()[:16]}"

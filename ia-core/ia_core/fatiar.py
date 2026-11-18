@@ -11,6 +11,7 @@ import fitz  # PyMuPDF
 from PIL import Image, ImageSequence
 
 from .orientacao import endireitar
+from .recorte import separar, reposicionar
 from .anonimizacao import PADROES, GRUPOS, caixas_de_palavras
 
 DPI = 150
@@ -62,7 +63,7 @@ def _gravar(saida, numero, png: bytes, w: int, h: int, texto: str, palavras, cai
     im.save(b, "WEBP", quality=70)
     saida.writestr(f"thumbs/{numero:04d}.webp", b.getvalue())
     return {"numero": numero, "largura": w, "altura": h, "texto_embutido": texto, "captura": captura, "palavras": palavras, "caixas": caixas,
-            "rotacao_corrigida": rotacao_corrigida}
+            "rotacao_corrigida": rotacao_corrigida, "texto_nativo": captura == "pdf" and bool(texto)}
 
 
 def _pagina_imagem(img: Image.Image, numero: int, saida: zipfile.ZipFile) -> dict:
@@ -87,7 +88,7 @@ def _pagina_imagem(img: Image.Image, numero: int, saida: zipfile.ZipFile) -> dic
     return _gravar(saida, numero, png, rgb.width, rgb.height, texto, palavras, caixas, "foto" if max(rgb.size) < 2500 else "scanner", graus)
 
 
-def fatiar(caminho: str, nome: str, destino_zip: str) -> int:
+def _fatiar_original(caminho: str, nome: str, destino_zip: str) -> int:
     """Escreve o ZIP (manifest.json + pages + thumbs) em disco, página a página (sem carregar o arquivo inteiro)."""
     ext = os.path.splitext(nome.lower())[1]
     paginas: List[dict] = []
@@ -118,3 +119,45 @@ def fatiar(caminho: str, nome: str, destino_zip: str) -> int:
                     paginas.append(_pagina_imagem(fr.copy(), i + 1, z))
         z.writestr("manifest.json", json.dumps({"paginas": paginas}, ensure_ascii=False))
     return len(paginas)
+
+
+def fatiar(caminho: str, nome: str, destino_zip: str) -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        bruto = os.path.join(tmp, "folhas.zip")
+        total = _fatiar_original(caminho, nome, bruto)
+        paginas = []
+        with zipfile.ZipFile(bruto) as src, zipfile.ZipFile(destino_zip, "w", zipfile.ZIP_STORED) as out:
+            originais = json.loads(src.read("manifest.json"))["paginas"]
+            for pg in originais:
+                png = src.read(f"pages/{pg['numero']:04d}.png")
+                boxes = separar(png, pg["palavras"])
+                im = None
+                for indice, box in enumerate(boxes, 1):
+                    numero = len(paginas)+1
+                    if len(boxes) == 1:
+                        out.writestr(f"pages/{numero:04d}.png", png)
+                        out.writestr(f"thumbs/{numero:04d}.webp", src.read(f"thumbs/{pg['numero']:04d}.webp"))
+                        nova = {**pg, "numero": numero}
+                    else:
+                        if im is None:
+                            im = Image.open(io.BytesIO(png))
+                        crop = im.crop((round(box[0]*im.width), round(box[1]*im.height), round(box[2]*im.width), round(box[3]*im.height)))
+                        b = io.BytesIO(); crop.save(b, "PNG")
+                        palavras = reposicionar(pg["palavras"], box)
+                        if palavras:
+                            # Reconstrói linhas mantendo a ordem de leitura e a posição de cada palavra.
+                            linhas = []
+                            for palavra in sorted(palavras, key=lambda p: (p[1], p[0])):
+                                if not linhas or abs(palavra[1]-linhas[-1][0]) > 0.008:
+                                    linhas.append((palavra[1], [palavra]))
+                                else:
+                                    linhas[-1][1].append(palavra)
+                            texto = "\n".join(" ".join(str(p[4]) for p in sorted(l[1], key=lambda p:p[0])) for l in linhas)
+                            nova = _gravar(out, numero, b.getvalue(), crop.width, crop.height, texto, palavras, caixas_de_palavras(palavras), pg["captura"], pg["rotacao_corrigida"])
+                        else:
+                            nova = _pagina_imagem(crop, numero, out)
+                    nova.update(pagina_origem=pg["numero"], regiao=indice, recorte=box,
+                                rotacao_corrigida=pg["rotacao_corrigida"])
+                    paginas.append(nova)
+            out.writestr("manifest.json", json.dumps({"paginas": paginas, "total_folhas": total}, ensure_ascii=False))
+        return len(paginas)

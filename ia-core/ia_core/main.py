@@ -1,5 +1,7 @@
 """IA Core — serviço FastAPI: fatia lotes, separa/classifica/extrai por página (multimodal) e devolve por callback assinado."""
 import hashlib
+import json
+import copy
 import re
 import hmac
 import io
@@ -8,7 +10,7 @@ import os
 import tempfile
 import threading
 import time
-from collections import deque
+from collections import deque, OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Dict, List, Optional
 
@@ -21,6 +23,8 @@ from starlette.background import BackgroundTask
 from . import agrupar, callback, catalogo, fatiar, render, schemas
 from .impressao import impressao_motor
 from .providers import Pedido, obter_provider
+from .telemetria import resumo
+from .transport import DOWNLOAD
 
 log = logging.getLogger("ia_core")
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +54,7 @@ class PaginaIn(BaseModel):
     numero: int
     image_url: str
     texto_embutido: str = ""
+    texto_nativo: Optional[bool] = None
 
 
 class TipoExtra(BaseModel):
@@ -133,9 +138,17 @@ def slice_(body: SliceIn):
 
 
 def _baixar(url: str) -> bytes:
-    r = httpx.get(url, timeout=120)
+    r = DOWNLOAD.get(url)
     r.raise_for_status()
     return r.content
+
+
+def _executar_modelo(pedido, enfileirado):
+    inicio = time.perf_counter()
+    resultado = PROVIDER.executar(pedido)
+    perf = resultado.setdefault("desempenho", {})
+    perf.update(fila_ms=round((inicio-enfileirado)*1000, 2), modelo_ms=round((time.perf_counter()-inicio)*1000, 2))
+    return resultado
 
 
 def _processar(job: JobIn):
@@ -149,6 +162,7 @@ def _processar(job: JobIn):
     for t in job.tipos_extras:  # tipos que a IA descobriu antes: as pistas aprendidas passam a valer na Camada 1 deste lote
         catalogo.registrar_tipo(t.codigo, t.nome, [catalogo.norm(p) for p in t.pistas], t.escopo, t.categoria)
     analises: Dict[int, dict] = {int(k): v for k, v in job.analises_previas.items()}
+    repetidas = OrderedDict()  # só deste job/tenant; até 128 resultados ou chamadas em andamento
     provisorias: Dict[int, dict] = {}  # página ainda esperando o modelo: o tipo que as regras locais deram serve de contexto à seguinte
     fila: "deque" = deque()  # (numero, sha, Future | Pagina)
     janela = 2 * LLM_CONCORRENCIA
@@ -157,7 +171,7 @@ def _processar(job: JobIn):
 
     def falhar(numero: int, erro: Exception) -> None:
         log.error("falha na página %d: %s", numero, erro)
-        for _, _, f in fila:
+        for _, _, f, _, _ in fila:
             if isinstance(f, Future):
                 f.cancel()
         callback.enviar(cb, {**base, "evento": "pagina", "numero": numero, "status": "FALHOU", "erro": str(erro)[:500]}, f"{job.batch_id}:{job.versao}:pagina:{numero}:falha")
@@ -166,13 +180,20 @@ def _processar(job: JobIn):
     def despachar(bloquear: bool) -> bool:
         """Envia o callback das páginas prontas na frente da fila (todas, se `bloquear`; senão só enquanto a fila passa da janela)."""
         while fila and (isinstance(fila[0][2], dict) or fila[0][2].done() or bloquear or len(fila) > janela):
-            numero, sha, r = fila.popleft()
+            numero, sha, r, tempos, reutilizada = fila.popleft()
             try:
-                a = dict(r.result() if isinstance(r, Future) else r)
+                a = copy.deepcopy(r.result() if isinstance(r, Future) else r)
             except Exception as e:  # noqa: BLE001
-                fila.appendleft((numero, sha, r))
+                fila.appendleft((numero, sha, r, tempos, reutilizada))
                 falhar(numero, e)
                 return False
+            if reutilizada is not None:
+                a.update(tokens=0, uso=resumo([]), camada="Camada 0: Repetição no lote (0 tokens)",
+                         reutilizada_da_pagina=reutilizada, desempenho={"reutilizada": True})
+            perf = a.setdefault("desempenho", {})
+            perf.update(tempos)
+            perf["total_ms"] = round(sum(perf.get(k, 0) for k in ("download_ms", "local_ms", "fila_ms", "modelo_ms")), 2)
+            a["tipo_lote_contexto"] = job.tipo_lote
             a["sha256"] = sha
             a["motor"] = MOTOR  # a Camada 0 só reaproveita análises feitas por este mesmo motor
             analises[numero] = a
@@ -192,24 +213,42 @@ def _processar(job: JobIn):
         try:
             if DELAY_MS:  # gancho de teste de caos: deixa o lote lento o bastante para derrubar processos no meio
                 time.sleep(DELAY_MS / 1000)
+            inicio = time.perf_counter()
             img = _baixar(p.image_url)
+            tempos = {"download_ms": round((time.perf_counter()-inicio)*1000, 2), "local_ms": 0}
             sha = hashlib.sha256(img).hexdigest()
-            r = PROVIDER.preparar(img, numero, anterior, p.texto_embutido, job.tipo_lote) if em_duas_etapas else PROVIDER.analisar(img, numero, anterior, p.texto_embutido, job.tipo_lote)
+            contexto = json.dumps([sha, p.texto_embutido, p.texto_nativo, job.tipo_lote,
+                                   (anterior or {}).get("tipo"), sorted(catalogo.TIPOS)], ensure_ascii=False)
+            chave = hashlib.sha256(contexto.encode()).hexdigest()
+            reutilizada = None
+            if chave in repetidas:
+                reutilizada, r, tipo_provisorio = repetidas[chave]
+                repetidas.move_to_end(chave)
+            else:
+                inicio = time.perf_counter()
+                kwargs = {"texto_nativo": p.texto_nativo} if p.texto_nativo is not None else {}
+                r = PROVIDER.preparar(img, numero, anterior, p.texto_embutido, job.tipo_lote, **kwargs) if em_duas_etapas else PROVIDER.analisar(img, numero, anterior, p.texto_embutido, job.tipo_lote, **kwargs)
+                tempos["local_ms"] = round((time.perf_counter()-inicio)*1000, 2)
+                tipo_provisorio = r.tipo_local if isinstance(r, Pedido) else r.get("tipo", "OUTRO")
+                if isinstance(r, Pedido):
+                    r = LLM_POOL.submit(_executar_modelo, r, time.perf_counter())
+                repetidas[chave] = (numero, r, tipo_provisorio)
+                if len(repetidas) > 128:
+                    repetidas.popitem(last=False)
         except Exception as e:  # noqa: BLE001
             if despachar(True):  # o que veio antes da página com problema fica salvo
                 falhar(numero, e)
             return
-        if isinstance(r, Pedido):  # a chamada ao modelo segue em paralelo; a etapa local da próxima página não espera por ela
-            fila.append((numero, sha, LLM_POOL.submit(PROVIDER.executar, r)))
-            anterior = provisorias[numero] = {"tipo": r.tipo_local}
+        fila.append((numero, sha, r, tempos, reutilizada))
+        if isinstance(r, Future):
+            anterior = provisorias[numero] = {"tipo": tipo_provisorio}
         else:
-            fila.append((numero, sha, r))
             anterior = r
         if not despachar(False):
             return
     if not despachar(True):
         return
-    docs = agrupar.agrupar(analises)
+    docs = agrupar.agrupar(analises, limiar=job.limiar_confianca)
     callback.enviar(cb, {**base, "evento": "concluido", "documentos": docs}, f"{job.batch_id}:{job.versao}:concluido")
 
 

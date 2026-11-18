@@ -68,18 +68,21 @@ func (s *Server) pageURLs(ctx context.Context, tx pgx.Tx, tenantID string, d *do
 	if d.Batch == "" || len(d.Paginas) == 0 { // lançamento manual: não há imagem
 		return []gin.H{}, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT numero, storage_key, coalesce(thumb_key,''), rotacao, largura, altura FROM pages WHERE batch_id=$1 AND numero=ANY($2) ORDER BY numero`, d.Batch, d.Paginas)
+	rows, err := tx.Query(ctx, `SELECT numero, storage_key, coalesce(thumb_key,''), rotacao, largura, altura, coalesce(pagina_origem,numero), regiao, recorte FROM pages WHERE batch_id=$1 AND numero=ANY($2) ORDER BY numero`, d.Batch, d.Paginas)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []gin.H{}
 	for rows.Next() {
-		var n, rot int
+		var n, rot, origem, regiao int
+		var recorte json.RawMessage
 		var k, tk string
 		var w, h *int
-		rows.Scan(&n, &k, &tk, &rot, &w, &h)
-		item := gin.H{"numero": n, "rotacao": rot, "largura": w, "altura": h, "url": s.Signer.URL(storage.Grant{Tenant: tenantID, Key: k}, ttl)}
+		if err := rows.Scan(&n, &k, &tk, &rot, &w, &h, &origem, &regiao, &recorte); err != nil {
+			return nil, err
+		}
+		item := gin.H{"numero": n, "pagina_origem": origem, "regiao": regiao, "recorte": recorte, "rotacao": rot, "largura": w, "altura": h, "url": s.Signer.URL(storage.Grant{Tenant: tenantID, Key: k}, ttl)}
 		if tk != "" {
 			item["thumb_url"] = s.Signer.URL(storage.Grant{Tenant: tenantID, Key: tk}, ttl)
 		}
@@ -284,7 +287,7 @@ func (s *Server) renderDoc(ctx context.Context, tenantID, docID, modo string) ([
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT storage_key, analise, palavras_cifradas, palavras, caixas, texto_len + coalesce(length(texto_embutido),0) FROM pages WHERE batch_id=$1 AND numero=ANY($2) ORDER BY numero`, d.Batch, d.Paginas)
+		rows, err := tx.Query(ctx, `SELECT storage_key, analise, palavras_cifradas, palavras, caixas, texto_nativo FROM pages WHERE batch_id=$1 AND numero=ANY($2) ORDER BY numero`, d.Batch, d.Paginas)
 		if err != nil {
 			return err
 		}
@@ -292,7 +295,7 @@ func (s *Server) renderDoc(ctx context.Context, tenantID, docID, modo string) ([
 		for rows.Next() {
 			var k string
 			var an, pwCifrado, pw, cx []byte
-			var nativo int
+			var nativo bool
 			rows.Scan(&k, &an, &pwCifrado, &pw, &cx, &nativo)
 			t, e := sl.AnaliseTexto(an)
 			if e != nil {
@@ -305,7 +308,7 @@ func (s *Server) renderDoc(ctx context.Context, tenantID, docID, modo string) ([
 				}
 				pw = []byte(p)
 			}
-			rp := iacore.RenderPage{ImageURL: s.Signer.URLFor(s.Cfg.InternalBaseURL, storage.Grant{Tenant: tenantID, Key: k}, 10*time.Minute), Texto: t, TextoNativo: nativo >= 20}
+			rp := iacore.RenderPage{ImageURL: s.Signer.URLFor(s.Cfg.InternalBaseURL, storage.Grant{Tenant: tenantID, Key: k}, 10*time.Minute), Texto: t, TextoNativo: nativo}
 			if modo != "original" {
 				rp.Palavras = pw
 			}
@@ -331,7 +334,7 @@ func (s *Server) renderDoc(ctx context.Context, tenantID, docID, modo string) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	cacheKey := fmt.Sprintf("%s/%s/derived/%s-%s-v2-%d.pdf", tenantID, meta.Batch, meta.ID, modo, meta.Atualizado.Unix())
+	cacheKey := fmt.Sprintf("%s/%s/derived/%s-%s-v3-%d.pdf", tenantID, meta.Batch, meta.ID, modo, meta.Atualizado.Unix())
 	if b, err := s.Vault.ReadAll(ctx, tenantID, cacheKey); err == nil {
 		return b, meta, nil
 	}

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class CamposBase(BaseModel):
+    assinatura_detectada: Optional[bool] = Field(None, description="Assinatura conferida na imagem: presente, ausente ou não verificada")
     cpf: Optional[str] = Field(None, description="CPF do titular (somente dígitos ou com máscara)")
     nome: Optional[str] = Field(None, description="Nome completo do titular")
     matricula: Optional[str] = Field(None, description="Matrícula do funcionário")

@@ -464,12 +464,12 @@ func (i *Ingestor) Apply(ctx context.Context, tx pgx.Tx, tenantID, userID, docID
 
 // Corrigir campos reavalia os alertas que dependem desses campos; sinais antigos não devem permanecer após a correção.
 func (i *Ingestor) reconcileReviewAlerts(ctx context.Context, tx pgx.Tx, tenantID, docID string, submitted map[string]any) error {
-	var fields, alertsRaw, ncsRaw, reasonsRaw []byte
+	var fields, alertsRaw, ncsRaw, reasonsRaw, checklistRaw []byte
 	var employee *string
 	var tipo string
 	var expiry *time.Time
-	if err := tx.QueryRow(ctx, `SELECT campos, alertas, nao_conformidades, motivos_revisao, employee_id::text, document_type, validade_ate FROM documents WHERE id=$1`, docID).
-		Scan(&fields, &alertsRaw, &ncsRaw, &reasonsRaw, &employee, &tipo, &expiry); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT campos, alertas, nao_conformidades, motivos_revisao, employee_id::text, document_type, validade_ate, checklist FROM documents WHERE id=$1`, docID).
+		Scan(&fields, &alertsRaw, &ncsRaw, &reasonsRaw, &employee, &tipo, &expiry, &checklistRaw); err != nil {
 		return err
 	}
 	var campos map[string]any
@@ -480,6 +480,13 @@ func (i *Ingestor) reconcileReviewAlerts(ctx context.Context, tx pgx.Tx, tenantI
 	json.Unmarshal(ncsRaw, &ncs)
 	json.Unmarshal(reasonsRaw, &reasons)
 	clean := map[string]bool{"DADOS_DIVERGENTES": true, "DOCUMENTO_VENCIDO": true, "CERTIDAO_VENCIDA": true}
+	signature, signatureSet := submitted["assinatura_detectada"]
+	_, signatureBool := signature.(bool)
+	signatureSet = signatureSet && (signature == nil || signatureBool)
+	if signatureSet {
+		clean["DOCUMENTO_SEM_ASSINATURA"] = true
+		clean["ASSINATURA_NAO_VERIFICADA"] = true
+	}
 	var cpfMismatch bool
 	if raw := cpf.Clean(str(submitted, "cpf")); cpf.Valid(raw) {
 		clean["CPF_INVALIDO"] = true
@@ -524,12 +531,29 @@ func (i *Ingestor) reconcileReviewAlerts(ctx context.Context, tx pgx.Tx, tenantI
 	}
 	cleanNC := make([]map[string]any, 0, len(ncs))
 	for _, nc := range ncs {
-		if str(nc, "codigo") != "CERTIDAO_VENCIDA" {
+		if str(nc, "codigo") != "CERTIDAO_VENCIDA" && !(signatureSet && str(nc, "codigo") == "DOCUMENTO_SEM_ASSINATURA") {
 			cleanNC = append(cleanNC, nc)
 		}
 	}
 	if expired && cert {
 		cleanNC = append(cleanNC, map[string]any{"codigo": "CERTIDAO_VENCIDA", "descricao": "Certidão vencida em " + expiry.Format("02/01/2006")})
+	}
+	if signatureSet {
+		var ck []map[string]any
+		if err := json.Unmarshal(checklistRaw, &ck); err != nil {
+			return err
+		}
+		var applicable bool
+		ck, applicable = signatureChecklist(ck, signature)
+		if applicable && signature == false {
+			alerts = append(alerts, map[string]any{"codigo": "DOCUMENTO_SEM_ASSINATURA", "severidade": "aviso", "mensagem": "Ausência de assinatura confirmada na revisão"})
+			cleanNC = append(cleanNC, map[string]any{"codigo": "DOCUMENTO_SEM_ASSINATURA", "descricao": "Ausência de assinatura confirmada na revisão"})
+		}
+		if applicable && signature == nil {
+			reasons = append(reasons, "ASSINATURA_NAO_VERIFICADA")
+			clean["ASSINATURA_NAO_VERIFICADA"] = false
+		}
+		checklistRaw, _ = json.Marshal(ck)
 	}
 	newReasons := make([]string, 0, len(reasons)+2)
 	for _, r := range reasons {
@@ -548,7 +572,7 @@ func (i *Ingestor) reconcileReviewAlerts(ctx context.Context, tx pgx.Tx, tenantI
 	aj, _ := json.Marshal(alerts)
 	nj, _ := json.Marshal(cleanNC)
 	mj, _ := json.Marshal(uniq(newReasons))
-	_, err := tx.Exec(ctx, `UPDATE documents SET alertas=$2, nao_conformidades=$3, motivos_revisao=$4 WHERE id=$1`, docID, aj, nj, mj)
+	_, err := tx.Exec(ctx, `UPDATE documents SET alertas=$2, nao_conformidades=$3, motivos_revisao=$4, checklist=$5 WHERE id=$1`, docID, aj, nj, mj, checklistRaw)
 	return err
 }
 
@@ -589,4 +613,23 @@ func (i *Ingestor) CreateEmployee(ctx context.Context, tx pgx.Tx, tenantID strin
 		return "", problem.Conflict("já existe funcionário com este CPF")
 	}
 	return id, err
+}
+
+// Uma correção visual da assinatura deve atualizar o checklist sem apagar outras regras.
+func signatureChecklist(items []map[string]any, present any) ([]map[string]any, bool) {
+	applicable := false
+	for _, item := range items {
+		if str(item, "regra") != "Assinatura identificada" {
+			continue
+		}
+		applicable = true
+		item["status"], item["detalhe"] = "FALHA", "Ausência de assinatura confirmada na revisão"
+		if present == true {
+			item["status"], item["detalhe"] = "OK", "Assinatura conferida na revisão humana"
+		}
+		if present == nil {
+			item["status"], item["detalhe"] = "REVISAO_HUMANA", "Assinatura não verificada; conferir a imagem"
+		}
+	}
+	return items, applicable
 }

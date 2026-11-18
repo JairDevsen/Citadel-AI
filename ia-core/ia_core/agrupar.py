@@ -10,7 +10,6 @@ from .extracao import aviso_em_branco
 from .paginacao import cpfs_do_texto, ids_de_documento, marcador_de_pagina
 from .validacoes import validar
 
-CUSTO_POR_1K_TOKENS_BRL = 0.0004
 BASELINE_TOKENS_VISION = 1500  # referência: página inteira enviada como imagem sem otimização
 CAMADA_PADRAO = "Camada 1: Texto nativo + regex local (custo zero)"
 
@@ -21,7 +20,7 @@ def _nivel(camada: str) -> int:
 
 
 def _novo(tipo: str, a: dict) -> dict:
-    return {"tipo": tipo, "paginas": [], "textos": [], "confs": [], "campos": {}, "manuscrito": False, "ilegivel": False, "multi": False, "tokens": 0,
+    return {"tipo": tipo, "paginas": [], "textos": [], "confs": [], "campos": {}, "manuscrito": False, "ilegivel": False, "multi": False, "tokens": 0, "custos": [], "assinaturas": [],
             "titulo": a.get("titulo", ""), "camadas": [], "shas": [], "borrada": False, "total": 0, "complemento": False, "so_complemento": False, "ids": set(), "cpfs": set(), "melhor": (-1.0, tipo)}
 
 
@@ -45,7 +44,7 @@ def _continua(n, a, tipo, mk, comp, ids, cpfs, grupos, abertos, ultimo):
     """(documento ao qual a página `n` pertence, ou None para abrir um novo; tipo a usar). Regras na docstring de `agrupar`."""
     if mk and mk[0] > 1:  # "Página 2/3": a contagem manda, mesmo que o tipo lido da página 1 seja outro
         for c in (ultimo, abertos.get(tipo)):
-            if not c:
+            if not c or _outro_documento(c, ids) or (cpfs and c["cpfs"] and not cpfs & c["cpfs"]):
                 continue
             mesmo_total = c["total"] == mk[1] and len(c["paginas"]) < mk[1]   # o documento já declarou ter este total de páginas
             so_pela_contagem = len(c["paginas"]) == mk[0] - 1 and (c["tipo"] in (tipo, "OUTRO") or c["melhor"][0] < 0.6)
@@ -55,15 +54,15 @@ def _continua(n, a, tipo, mk, comp, ids, cpfs, grupos, abertos, ultimo):
     if mk:  # "Página 1/N" começa documento
         return None, tipo
     if ids:  # mesmo número de documento (objeto do AR): frente e verso se encontram mesmo longe um do outro
-        alvo = next((g for g in reversed(grupos) if g["ids"] & ids and len(g["paginas"]) < 6), None)
+        alvo = next((g for g in reversed(grupos) if g["ids"] & ids and g["tipo"] in (tipo, comp, "OUTRO") and (not cpfs or not g["cpfs"] or cpfs & g["cpfs"]) and len(g["paginas"]) < 6), None)
         if alvo:
             return alvo, tipo
     if comp:
-        if ultimo and ultimo["tipo"] == comp and not ultimo["complemento"] and ultimo["paginas"][-1] == n - 1 and not _outro_documento(ultimo, ids):
+        if ultimo and ultimo["tipo"] == comp and not ultimo["complemento"] and ultimo["paginas"][-1] == n - 1 and not _outro_documento(ultimo, ids) and (not cpfs or not ultimo["cpfs"] or bool(cpfs & ultimo["cpfs"])):
             return ultimo, comp
         # fora de ordem ou com outra página no meio: liga pelo CPF do trabalhador; sem CPF legível, só se houver um único
         # candidato muito próximo (até 2 páginas antes)
-        livres = [g for g in grupos if g["tipo"] == comp and not g["complemento"] and not _outro_documento(g, ids)]
+        livres = [g for g in grupos if g["tipo"] == comp and not g["complemento"] and not _outro_documento(g, ids) and (not cpfs or not g["cpfs"] or bool(cpfs & g["cpfs"]))]
         por_cpf = [g for g in livres if g["cpfs"] & cpfs]
         perto = [g for g in livres if n - g["paginas"][-1] <= 2]
         return (por_cpf[-1] if por_cpf else perto[0] if len(perto) == 1 else None), comp
@@ -71,11 +70,14 @@ def _continua(n, a, tipo, mk, comp, ids, cpfs, grupos, abertos, ultimo):
             and not _outro_documento(ultimo, ids) and (not ultimo["cpfs"] or not cpfs or ultimo["cpfs"] & cpfs)):
         return ultimo, tipo  # o termo anexo veio ANTES da página principal do mesmo documento
     if not a.get("inicia_documento", True):
-        return (ultimo if ultimo and ultimo["tipo"] == tipo else abertos.get(tipo)), tipo
+        candidato = ultimo if ultimo and ultimo["tipo"] == tipo else abertos.get(tipo)
+        if candidato and (_outro_documento(candidato, ids) or (cpfs and candidato["cpfs"] and not cpfs & candidato["cpfs"])):
+            return None, tipo
+        return candidato, tipo
     return None, tipo
 
 
-def agrupar(analises: Dict[int, dict]) -> List[dict]:
+def agrupar(analises: Dict[int, dict], limiar: float = 0.75) -> List[dict]:
     """analises: {numero: Pagina}. Páginas em branco separam documentos e são descartadas.
 
     A decisão de "esta página continua o documento anterior?" segue, nesta ordem (vale para qualquer provedor de IA):
@@ -125,12 +127,16 @@ def agrupar(analises: Dict[int, dict]) -> List[dict]:
             alvo["melhor"] = (conf, tipo)
             alvo["tipo"], alvo["titulo"] = tipo, a.get("titulo", "") or alvo["titulo"]
         for k, v in (a.get("campos") or {}).items():
-            if v and not alvo["campos"].get(k):
+            if k == "assinatura_detectada" and isinstance(v, bool):
+                alvo["campos"][k] = alvo["campos"].get(k) is True or v
+            elif v and not alvo["campos"].get(k):
                 alvo["campos"][k] = v
+        alvo["assinaturas"].append((a.get("campos") or {}).get("assinatura_detectada"))
         alvo["manuscrito"] |= bool(a.get("possui_manuscrito"))
         alvo["ilegivel"] |= bool(a.get("pagina_ilegivel"))
         alvo["borrada"] |= bool(a.get("borrada"))
         alvo["multi"] |= bool(a.get("multiplos_documentos_na_imagem"))
+        alvo["custos"].append((a.get("uso") or {}).get("custo_estimado_brl", 0 if not a.get("tokens") else None))
         alvo["tokens"] += int(a.get("tokens", 0) or 0)
         alvo["camadas"].append(a.get("camada") or CAMADA_PADRAO)
         alvo["shas"].append(a.get("sha256") or "")
@@ -139,8 +145,11 @@ def agrupar(analises: Dict[int, dict]) -> List[dict]:
     docs = []
     for g in grupos:
         texto = "\n\n".join(g["textos"])
+        g["campos"]["assinatura_detectada"] = (True if True in g["assinaturas"] else False if all(v is False for v in g["assinaturas"]) else None)
         alertas, ncs = validar(g["tipo"], texto, g["campos"])
         motivos = []
+        if TIPOS.get(g["tipo"], {}).get("assina") and g["campos"].get("assinatura_detectada") is None:
+            motivos.append("ASSINATURA_NAO_VERIFICADA")
         if g["borrada"]:
             alertas.append({"severidade": "erro", "codigo": "IMAGEM_BORRADA", "mensagem": "Não foi possível realizar a leitura do documento. Envie uma imagem mais nítida."})
             motivos.append("IMAGEM_BORRADA")
@@ -154,9 +163,9 @@ def agrupar(analises: Dict[int, dict]) -> List[dict]:
             "campos": g["campos"], "alertas": alertas, "motivos_revisao": motivos, "nao_conformidades": ncs, "dados_sensiveis": sensiveis,
             "texto_ocr": texto, "texto_anonimizado": anon, "possui_manuscrito": g["manuscrito"], "pagina_ilegivel": g["ilegivel"],
             "multiplos_documentos_na_imagem": g["multi"],
-            "checklist": _cl.montar(g["tipo"], texto, g["campos"], conf, g["ilegivel"], borrada=g["borrada"]),
+            "checklist": _cl.montar(g["tipo"], texto, g["campos"], conf, g["ilegivel"], limiar=limiar, borrada=g["borrada"]),
             "finops": {"camada_roteamento": camada, "sha256_hash": next((x for x in g["shas"] if x), ""), "tokens_consumidos": g["tokens"],
                        "tokens_economizados": max(0, base - g["tokens"]), "economia_estimada_pct": economia,
-                       "custo_estimado_brl": round(g["tokens"] / 1000 * CUSTO_POR_1K_TOKENS_BRL, 4)},
+                       "custo_estimado_brl": sum(g["custos"]) if all(c is not None for c in g["custos"]) else None},
         })
     return docs

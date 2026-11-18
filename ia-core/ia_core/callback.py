@@ -6,6 +6,7 @@ import os
 import time
 
 import httpx
+from .transport import CALLBACK
 
 
 def assinar(secret: str, ts: str, corpo: bytes) -> str:
@@ -19,7 +20,7 @@ def enviar(url: str, payload: dict, idem: str, tentativas: int = 4) -> bool:
     for _ in range(tentativas):
         ts = str(int(time.time()))
         try:
-            r = httpx.post(url, content=corpo, timeout=30, headers={"Content-Type": "application/json", "X-Timestamp": ts, "X-Signature": assinar(secret, ts, corpo), "Idempotency-Key": idem})
+            r = CALLBACK.post(url, content=corpo, headers={"Content-Type": "application/json", "X-Timestamp": ts, "X-Signature": assinar(secret, ts, corpo), "Idempotency-Key": idem})
             if r.status_code < 300:
                 return True
             if r.status_code in (400, 401, 403):

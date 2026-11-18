@@ -38,10 +38,12 @@ def montar(tipo: str, texto: str, campos: Dict, confianca: float, ilegivel: bool
             add("Validade vigente", "OK", f"Válido até {val.strftime('%d/%m/%Y')}")
 
     if TIPOS.get(tipo, {}).get("assina"):
-        if re.search(r"ASSINAD|ASSINATURA|RUBRICA", t):
+        if campos.get("assinatura_detectada") is True:
             add("Assinatura identificada", "OK", "Assinatura/rubrica presente no documento")
+        elif campos.get("assinatura_detectada") is False:
+            add("Assinatura identificada", "FALHA", "Ausência de assinatura identificada na imagem")
         else:
-            add("Assinatura identificada", "FALHA", "Nenhuma assinatura identificada")
+            add("Assinatura identificada", "REVISAO_HUMANA", "Assinatura não verificada visualmente; conferir a imagem")
 
     data = _d(campos.get("data_documento"))
     if tipo == "ASO":

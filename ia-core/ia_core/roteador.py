@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List
 
-from .catalogo import DOCS_DA_EMPRESA, DOCS_MENSAIS
+from .catalogo import DOCS_DA_EMPRESA, DOCS_MENSAIS, TIPOS
 from .orientacao import palavras_reconhecidas
 from .extracao import cpf_valido
 
@@ -49,6 +49,8 @@ def campos_faltando(tipo: str, campos: dict, inicia_documento: bool) -> List[str
 
 def decidir(local: dict, texto: str, nativo: bool, tipos_visao: Iterable[str]) -> Rota:
     """Rota de uma página a partir da leitura local (`local` = análise do motor de regras sobre `texto`)."""
+    if TIPOS.get(local["tipo"], {}).get("assina"):
+        return Rota(3, "assinatura exige verificação visual")
     if local["tipo"] in tipos_visao or local.get("possui_manuscrito") or local.get("pagina_ilegivel"):
         return Rota(3, "manuscrito, formulário ou rasura: só a imagem resolve")
     if not texto_legivel(texto, nativo):
@@ -66,6 +68,8 @@ def decidir(local: dict, texto: str, nativo: bool, tipos_visao: Iterable[str]) -
 
 def precisa_subir(resposta: dict, local: dict, texto: str, nativo: bool) -> str:
     """Depois da Camada 2: devolve o motivo para subir à visão, ou '' se a resposta do modelo de texto vale."""
+    if TIPOS.get(resposta.get("tipo"), {}).get("assina"):
+        return "assinatura exige verificação visual"
     if resposta.get("pagina_ilegivel") or resposta.get("multiplos_documentos_na_imagem"):
         return "modelo de texto reportou página ilegível ou com vários documentos"
     try:

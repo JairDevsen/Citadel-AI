@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { IAMetrics } from './IAMetrics'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis, Cell } from 'recharts'
@@ -26,6 +27,7 @@ export function MasterHome() {
         <KpiCard label="Lotes com falha/retentativa" icon={<AlertTriangle className="h-4 w-4" />} value={o.falhas_ia} tone={o.falhas_ia ? 'warning' : 'default'} />
         <KpiCard label="MRR" icon={<TrendingUp className="h-4 w-4" />} value={fmtMoney(o.mrr_centavos)} hint="preços por contrato (sob consulta)" />
       </div>
+      <div className="mt-5"><IAMetrics compact /></div>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <Card title="Páginas por dia (30 dias)"><div className="h-56" role="img" aria-label="Páginas por dia"><ResponsiveContainer><BarChart data={o.paginas_por_dia}><CartesianGrid stroke={C.grid} vertical={false} /><XAxis dataKey="dia" {...axis} tickFormatter={(d) => d.slice(8)} /><YAxis {...axis} /><ChartTip /><Bar dataKey="paginas" name="Páginas" fill={C.brand} radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
         <Card title="Clientes perto da cota (≥ 80%)">{o.perto_da_cota.length ? <ul className="space-y-2 text-sm">{o.perto_da_cota.map((c: any) => <li key={c.id}><Link className="flex justify-between rounded-lg bg-warning-bg p-2 text-warning" to={`/app/clientes/${c.id}/armazenamento`}><span>{c.nome}</span><b>{c.pct}%</b></Link></li>)}</ul> : <p className="text-sm text-muted-foreground">Nenhum cliente perto da cota.</p>}</Card>
@@ -119,7 +121,7 @@ export function TenantUso() {
   const d = u.data
   if (secao === 'armazenamento') return (<div className="space-y-4"><Card title="Eventos de armazenamento"><DataTable rows={d.eventos} cols={[{ key: 'tipo', header: 'Tipo' }, { key: 'bytes', header: 'Tamanho', render: (x) => fmtBytes(x.bytes) }, { key: 'criado_em', header: 'Quando', render: (x) => fmtDateTime(x.criado_em) }]} /></Card><Card title="Maiores lotes"><DataTable rows={d.maiores_lotes} cols={[{ key: 'arquivo_original', header: 'Arquivo' }, { key: 'bytes', header: 'Tamanho', render: (x) => fmtBytes(x.bytes) }, { key: 'total_paginas', header: 'Páginas' }]} /></Card></div>)
   if (secao === 'faturamento') return <Card title="Faturamento"><DataTable rows={d.faturas} empty={<EmptyState title="Nenhuma fatura" />} cols={[{ key: 'referencia', header: 'Referência' }, { key: 'valor_centavos', header: 'Valor', render: (x) => fmtMoney(x.valor_centavos) }, { key: 'status', header: 'Status' }, { key: 'vencimento', header: 'Vencimento', render: (x) => fmtDate(x.vencimento) }]} /></Card>
-  return <Card title="Uso da IA por mês"><DataTable rows={d.mensal} cols={[{ key: 'mes', header: 'Mês' }, { key: 'paginas', header: 'Páginas' }, { key: 'docs', header: 'Documentos' }, { key: 'revisoes', header: 'Revisões' }, { key: 'tokens', header: 'Tokens' }, { key: 'custo_ia_centavos', header: 'Custo estimado', render: (x) => fmtMoney(x.custo_ia_centavos) }]} /></Card>
+  return <div className="space-y-5"><IAMetrics tenantId={id} /><Card title="Uso da IA por mês"><DataTable rows={d.mensal} cols={[{ key: 'mes', header: 'Mês' }, { key: 'paginas', header: 'Páginas' }, { key: 'docs', header: 'Documentos' }, { key: 'revisoes', header: 'Revisões' }, { key: 'tokens', header: 'Tokens' }, { key: 'custo_ia_centavos', header: 'Custo registrado (parcial)', render: (x) => fmtMoney(x.custo_ia_centavos) }]} /></Card></div>
 }
 
 export function TenantUsuarios() {
@@ -225,10 +227,10 @@ export function QueuesPage() {
   return (
     <div><SectionHeading eyebrow="Plataforma" title="Filas e jobs">Acompanhe o processamento e retome lotes com falhas persistentes.</SectionHeading>
       {o.data && <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Processando" value={o.data.fila.processando} /><KpiCard label="Falhos" value={o.data.fila.falhos} tone={o.data.fila.falhos ? 'danger' : 'default'} /><KpiCard label="Reprocessamentos" value={o.data.reprocessamentos} /><KpiCard label="Tempo médio por página" value={o.data.tempo_medio_por_pagina_seg ? o.data.tempo_medio_por_pagina_seg + 's' : '—'} /></div>}
+      <div className="mb-5"><IAMetrics /></div>
       <Card title="Fila de mensagens mortas (falhas persistentes após 3 tentativas)">
         <DataTable rows={d.data} loading={d.isLoading} empty={<EmptyState title="Nenhuma falha persistente" />} cols={[{ key: 'empresa', header: 'Empresa' }, { key: 'arquivo_original', header: 'Lote' }, { key: 'erro', header: 'Erro' }, { key: 'tentativas', header: 'Tentativas' }, { key: 'criado_em', header: 'Quando', render: (x) => fmtDateTime(x.criado_em) },
           { key: 'a', header: '', align: 'right', render: (x) => (x.resolvido_em ? <StatusPill status="OK" label="Retomado" /> : <Button size="sm" onClick={async () => { await api(`/admin/ia/dead-letters/${x.id}/retry`, { method: 'POST' }); qc.invalidateQueries({ queryKey: ['/admin/ia/dead-letters'] }) }}><RefreshCw className="h-3.5 w-3.5" />Retomar</Button>) }]} /></Card>
-      <Card className="mt-5" title="Custo estimado por empresa (mês)"><DataTable rows={o.data?.custo_por_empresa} cols={[{ key: 'empresa', header: 'Empresa' }, { key: 'tokens', header: 'Tokens' }, { key: 'custo_centavos', header: 'Custo', render: (x) => fmtMoney(x.custo_centavos) }]} empty={<EmptyState title="Sem consumo registrado neste mês" />} /></Card>
     </div>
   )
 }

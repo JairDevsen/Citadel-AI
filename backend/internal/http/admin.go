@@ -53,6 +53,7 @@ func (s *Server) adminRoutes(m *gin.RouterGroup, v1 *gin.RouterGroup) {
 	m.GET("/document-types", s.listDocTypes)
 	m.PATCH("/document-types/:id", s.adminPatchDocType)
 	m.GET("/ia/overview", s.adminIAOverview)
+	m.GET("/ia/metrics", s.adminIAMetrics)
 	m.GET("/ia/dead-letters", s.adminDeadLetters)
 	m.POST("/ia/dead-letters/:id/retry", s.adminRetryDead)
 	m.GET("/ia/quality", s.adminQuality)

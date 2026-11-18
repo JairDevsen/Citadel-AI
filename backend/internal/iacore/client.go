@@ -30,6 +30,7 @@ type PageRef struct {
 	Numero        int    `json:"numero"`
 	ImageURL      string `json:"image_url"`
 	TextoEmbutido string `json:"texto_embutido,omitempty"`
+	TextoNativo   bool   `json:"texto_nativo"`
 }
 
 type JobRequest struct {

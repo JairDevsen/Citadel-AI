@@ -84,7 +84,7 @@ def test_checklist_e_telemetria_no_lote_misto():
     aso = {i["regra"]: i["status"] for i in por[(4,)]["checklist"]}
     assert aso["NR-07 · Parecer médico"] == "OK" and aso["NR-07 · Periodicidade (12 meses)"] == "OK"
     epi = {i["regra"]: i["status"] for i in por[(6,)]["checklist"]}
-    assert epi["NR-06 · Certificado de Aprovação (CA)"] == "OK" and epi["Assinatura identificada"] == "OK"
+    assert epi["NR-06 · Certificado de Aprovação (CA)"] == "OK" and epi["Assinatura identificada"] == "REVISAO_HUMANA"
     crf = {i["regra"]: i["status"] for i in por[(9,)]["checklist"]}
     assert crf["Validade vigente"] == "FALHA"          # certidão vencida
     ar = {i["regra"]: i["status"] for i in por[(8,)]["checklist"]}

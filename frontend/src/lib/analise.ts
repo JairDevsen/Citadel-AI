@@ -8,6 +8,7 @@ const TITULOS: Record<string, string> = {
   INTERVALO_INFERIOR_1H: 'Intervalo menor que 1 hora', FGTS_DIVERGENTE: 'FGTS divergente', PONTO_BRITANICO: 'Ponto britânico', RECUSA_SEM_TESTEMUNHAS: 'Recusa sem testemunhas', EMPREGADOR_DIVERGENTE: 'Empregador divergente',
 }
 const MOTIVOS: Record<string, [string, string, 'atencao' | 'erro']> = {
+  ASSINATURA_NAO_VERIFICADA: ['Assinatura não verificada', 'Confira a assinatura na imagem, incluindo o verso, e informe o resultado no formulário.', 'atencao'],
   SEM_VINCULO: ['Sem vínculo', 'Não foi possível ligar este documento a um funcionário cadastrado.', 'atencao'],
   BAIXA_CONFIANCA: ['Baixa confiança', 'A leitura automática ficou abaixo do limiar de confiança da empresa.', 'atencao'],
   PAGINA_ILEGIVEL: ['Página ilegível', 'Não foi possível ler o conteúdo desta página.', 'erro'],

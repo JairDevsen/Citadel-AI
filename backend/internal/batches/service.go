@@ -160,9 +160,15 @@ func (s *Service) Process(ctx context.Context, p TaskPayload) error {
 }
 
 type manifest struct {
-	Paginas []struct {
+	TotalFolhas int `json:"total_folhas"`
+	Paginas     []struct {
 		Numero        int             `json:"numero"`
+		PaginaOrigem  int             `json:"pagina_origem"`
+		Regiao        int             `json:"regiao"`
+		Recorte       json.RawMessage `json:"recorte"`
+		RotacaoOrigem int             `json:"rotacao_corrigida"`
 		TextoEmbutido string          `json:"texto_embutido"`
+		TextoNativo   bool            `json:"texto_nativo"`
 		Captura       string          `json:"captura"`
 		Largura       int             `json:"largura"`
 		Altura        int             `json:"altura"`
@@ -198,29 +204,41 @@ func (s *Service) slicePagesIfNeeded(ctx context.Context, b *batchRow) error {
 	if !ok {
 		return fmt.Errorf("manifest.json ausente")
 	}
-	rc, _ := mf.Open()
+	rc, err := mf.Open()
+	if err != nil {
+		return err
+	}
 	var m manifest
-	json.NewDecoder(rc).Decode(&m)
+	decodeErr := json.NewDecoder(rc).Decode(&m)
 	rc.Close()
+	if decodeErr != nil {
+		return fmt.Errorf("manifest inválido: %w", decodeErr)
+	}
 	if len(m.Paginas) == 0 {
 		return fmt.Errorf("nenhuma página encontrada no arquivo")
 	}
-	// cota mensal de páginas
+	if m.TotalFolhas == 0 {
+		m.TotalFolhas = len(m.Paginas)
+	}
+	// A cota conta folhas físicas; recortes não multiplicam o consumo da cota.
 	var quotaErr error
-	s.DB.Tenant(ctx, b.TenantID, func(tx pgx.Tx) error {
-		var used, quota int
-		tx.QueryRow(ctx, `SELECT coalesce((SELECT paginas FROM usage_monthly WHERE tenant_id=$1 AND mes=to_char(now(),'YYYY-MM')),0), quota_paginas_mes FROM tenants WHERE id=$1`, b.TenantID).Scan(&used, &quota)
-		if used+len(m.Paginas) > quota && n == 0 {
-			quotaErr = fmt.Errorf("cota mensal de páginas excedida (%d + %d > %d)", used, len(m.Paginas), quota)
+	if err := s.DB.Tenant(ctx, b.TenantID, func(tx pgx.Tx) error {
+		var used, quota, contabilizadas int
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT paginas FROM usage_monthly WHERE tenant_id=$1 AND mes=to_char(now(),'YYYY-MM')),0), quota_paginas_mes, (SELECT total_folhas FROM batches WHERE id=$2) FROM tenants WHERE id=$1`, b.TenantID, b.ID).Scan(&used, &quota, &contabilizadas); err != nil {
+			return err
+		}
+		if used+max(0, m.TotalFolhas-contabilizadas) > quota {
+			quotaErr = fmt.Errorf("cota mensal de páginas excedida (%d + %d > %d)", used, max(0, m.TotalFolhas-contabilizadas), quota)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 	if quotaErr != nil {
 		s.failPermanent(ctx, b.TenantID, b.ID, quotaErr.Error(), "COTA")
 		return nil
 	}
 	var derived int64
-	newPages := 0
 	sl, err := s.sealer(ctx, b.TenantID)
 	if err != nil {
 		return fmt.Errorf("chave da empresa: %w", err)
@@ -266,10 +284,9 @@ func (s *Service) slicePagesIfNeeded(ctx context.Context, b *batchRow) error {
 		}
 		err = s.DB.Tenant(ctx, b.TenantID, func(tx pgx.Tx) error {
 			// o texto lido e as palavras com posição entram cifrados; as colunas em claro ficam vazias
-			ct, err := tx.Exec(ctx, `INSERT INTO pages (tenant_id, batch_id, numero, storage_key, thumb_key, texto_cifrado, texto_len, captura, largura, altura, caixas, palavras_cifradas, hash_sha256)
-			  VALUES ($1,$2,$3,$4,nullif($5,''),$6,$7,nullif($8,''),$9,$10,coalesce($11::jsonb,'[]'),$12,$13) ON CONFLICT (batch_id, numero) DO NOTHING`,
-				b.TenantID, b.ID, pg.Numero, key, tkey, textoCifrado, len(pg.TextoEmbutido), pg.Captura, pg.Largura, pg.Altura, nilIfEmpty(pg.Caixas), palavrasCifradas, hash)
-			newPages += int(ct.RowsAffected())
+			_, err := tx.Exec(ctx, `INSERT INTO pages (tenant_id, batch_id, numero, storage_key, thumb_key, texto_cifrado, texto_len, captura, largura, altura, caixas, palavras_cifradas, hash_sha256, pagina_origem, regiao, recorte, rotacao_origem, texto_nativo)
+			  VALUES ($1,$2,$3,$4,nullif($5,''),$6,$7,nullif($8,''),$9,$10,coalesce($11::jsonb,'[]'),$12,$13,coalesce(nullif($14,0),$3),greatest($15,1),coalesce($16::jsonb,'[0,0,1,1]'),$17,$18) ON CONFLICT (batch_id, numero) DO NOTHING`,
+				b.TenantID, b.ID, pg.Numero, key, tkey, textoCifrado, len(pg.TextoEmbutido), pg.Captura, pg.Largura, pg.Altura, nilIfEmpty(pg.Caixas), palavrasCifradas, hash, pg.PaginaOrigem, pg.Regiao, nilIfEmpty(pg.Recorte), pg.RotacaoOrigem, pg.TextoNativo)
 			return err
 		})
 		if err != nil {
@@ -277,12 +294,18 @@ func (s *Service) slicePagesIfNeeded(ctx context.Context, b *batchRow) error {
 		}
 	}
 	return s.DB.Tenant(ctx, b.TenantID, func(tx pgx.Tx) error {
-		tx.Exec(ctx, `UPDATE batches SET total_paginas=$2, heartbeat_em=now() WHERE id=$1`, b.ID, len(m.Paginas))
+		var anteriores int
+		if err := tx.QueryRow(ctx, `SELECT total_folhas FROM batches WHERE id=$1 FOR UPDATE`, b.ID).Scan(&anteriores); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE batches SET total_paginas=$2, total_folhas=$3, heartbeat_em=now() WHERE id=$1`, b.ID, len(m.Paginas), m.TotalFolhas); err != nil {
+			return err
+		}
 		tx.Exec(ctx, `UPDATE tenants SET bytes_usados=bytes_usados+$2 WHERE id=$1`, b.TenantID, derived)
 		tx.Exec(ctx, `INSERT INTO storage_events (tenant_id, tipo, bytes, objeto) VALUES ($1,'DERIVADO',$2,$3)`, b.TenantID, derived, b.ID)
 		tx.Exec(ctx, `INSERT INTO usage_monthly (tenant_id, mes, paginas, bytes_total) VALUES ($1, to_char(now(),'YYYY-MM'), $2, $3)
-		  ON CONFLICT (tenant_id, mes) DO UPDATE SET paginas=usage_monthly.paginas+$2, bytes_total=usage_monthly.bytes_total+$3`, b.TenantID, newPages, derived)
-		timeline(ctx, tx, b.ID, "FATIADO", fmt.Sprintf("%d páginas extraídas e miniaturas geradas", len(m.Paginas)))
+		  ON CONFLICT (tenant_id, mes) DO UPDATE SET paginas=usage_monthly.paginas+$2, bytes_total=usage_monthly.bytes_total+$3`, b.TenantID, max(0, m.TotalFolhas-anteriores), derived)
+		timeline(ctx, tx, b.ID, "FATIADO", fmt.Sprintf("%d folhas de origem, %d regiões extraídas e miniaturas geradas", m.TotalFolhas, len(m.Paginas)))
 		return nil
 	})
 }
@@ -303,13 +326,7 @@ func (s *Service) dispatch(ctx context.Context, b *batchRow, failAt int) error {
 			return nil // sem saber qual motor está ativo, não dá para garantir que a análise antiga ainda vale: analisa tudo
 		}
 		var n int
-		err := tx.QueryRow(ctx, `WITH src AS (
-		    SELECT DISTINCT ON (hash_sha256) hash_sha256, analise, batch_id FROM pages
-		    WHERE proc_status='OK' AND analise IS NOT NULL AND analise->>'motor' = $3 AND hash_sha256 IS NOT NULL AND batch_id<>$1 ORDER BY hash_sha256, processado_em DESC),
-		  upd AS (UPDATE pages p SET proc_status='OK', erro=NULL, processado_em=now(),
-		    analise = jsonb_set(jsonb_set(jsonb_set(src.analise,'{camada}', to_jsonb($2::text)),'{tokens}','0'),'{reutilizada_de}', to_jsonb(src.batch_id::text))
-		    FROM src WHERE p.batch_id=$1 AND p.proc_status<>'OK' AND p.hash_sha256=src.hash_sha256 RETURNING 1)
-		  SELECT count(*) FROM upd`, b.ID, CamadaCache, motor).Scan(&n)
+		err := tx.QueryRow(ctx, reusePagesSQL, b.ID, CamadaCache, motor, b.TenantID, b.TipoLote).Scan(&n)
 		if err == nil && n > 0 {
 			timeline(ctx, tx, b.ID, "CACHE_SHA256", fmt.Sprintf("%d página(s) reaproveitada(s) do cache SHA-256 (0 tokens)", n))
 		}
@@ -321,7 +338,7 @@ func (s *Service) dispatch(ctx context.Context, b *batchRow, failAt int) error {
 	}
 	err = s.DB.Tenant(ctx, b.TenantID, func(tx pgx.Tx) error {
 		tx.QueryRow(ctx, `SELECT limiar_confianca FROM tenants WHERE id=$1`, b.TenantID).Scan(&req.LimiarConfianca)
-		rows, err := tx.Query(ctx, `SELECT numero, storage_key, proc_status, analise, texto_cifrado, coalesce(texto_embutido,'') FROM pages WHERE batch_id=$1 ORDER BY numero`, b.ID)
+		rows, err := tx.Query(ctx, `SELECT numero, storage_key, proc_status, analise, texto_cifrado, coalesce(texto_embutido,''), texto_nativo FROM pages WHERE batch_id=$1 ORDER BY numero`, b.ID)
 		if err != nil {
 			return err
 		}
@@ -329,8 +346,11 @@ func (s *Service) dispatch(ctx context.Context, b *batchRow, failAt int) error {
 		for rows.Next() {
 			var n int
 			var key, st, emb string
+			var textoNativo bool
 			var an, embCifrado []byte
-			rows.Scan(&n, &key, &st, &an, &embCifrado, &emb)
+			if err := rows.Scan(&n, &key, &st, &an, &embCifrado, &emb, &textoNativo); err != nil {
+				return err
+			}
 			if st == "OK" && an != nil {
 				full, e := sl.RevealAnalise(an) // o checkpoint volta ao IA Core completo (texto e campos)
 				if e != nil {
@@ -343,7 +363,7 @@ func (s *Service) dispatch(ctx context.Context, b *batchRow, failAt int) error {
 				return err
 			}
 			pending++
-			req.Paginas = append(req.Paginas, iacore.PageRef{Numero: n, TextoEmbutido: emb,
+			req.Paginas = append(req.Paginas, iacore.PageRef{Numero: n, TextoEmbutido: emb, TextoNativo: textoNativo,
 				ImageURL: s.Signer.URLFor(s.Cfg.InternalBaseURL, storage.Grant{Tenant: b.TenantID, Key: key}, 2*time.Hour)})
 		}
 		return nil
@@ -535,6 +555,11 @@ func (s *Service) complete(ctx context.Context, tenantID string, unitID *string,
 		tx.QueryRow(ctx, `SELECT dica_funcionario_id::text, dica_tipo, substitui_documento_id::text FROM batches WHERE id=$1`, cb.BatchID).Scan(&h.EmployeeID, &h.Tipo, &h.Substitui)
 		sum, _, err := s.Ingest.Ingest(ctx, tx, tenantID, cb.BatchID, unitID, limiar, cb.Documentos, h)
 		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT coalesce(sum((analise->>'tokens')::bigint),0),
+          round(100*coalesce(sum((analise->'uso'->>'custo_conhecido_brl')::numeric),0))::bigint
+          FROM pages WHERE batch_id=$1 AND proc_status='OK'`, cb.BatchID).Scan(&sum.Tokens, &sum.CustoCent); err != nil {
 			return err
 		}
 		tx.QueryRow(ctx, `SELECT count(*) FROM pages WHERE batch_id=$1 AND analise->>'pagina_em_branco'='true'`, cb.BatchID).Scan(&sum.EmBranco)

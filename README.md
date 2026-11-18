@@ -58,6 +58,8 @@ O banco aplica isolamento por empresa com RLS; arquivos e CPF do cadastro usam c
 Para entender em detalhe **como a IA lê, classifica, separa e avalia os documentos** (camadas, OCR, agrupamento, indicadores de risco, limites e medições), veja [COMO_A_IA_FUNCIONA.md](COMO_A_IA_FUNCIONA.md).
 O [guia completo do sistema e da banca](DOCUMENTACAO_COMPLETA_SISTEMA_E_GUIA_BANCA.md) reúne arquitetura, funcionalidades, o catálogo de tipos de documentos, os indicadores de risco, regras de IA, segurança, APIs e **40 perguntas com respostas**. Use este README para entender o fluxo e executar a aplicação; consulte o guia para fórmulas, critérios exatos, evidências e limitações.
 
+Veja também [recortes, assinaturas e métricas por lote](docs/PROCESSAMENTO_E_METRICAS.md) para configuração de tarifas, fórmulas dos indicadores e limites da medição.
+
 ## Requisitos para rodar localmente
 
 Instale estes itens antes de começar. As versões mínimas vêm do projeto (`backend/go.mod`, `ia-core/pyproject.toml`, `docker-compose.dev.yml`).

@@ -29,6 +29,7 @@ export const emailDomain = (e: string) => e.split('@')[1]?.toLowerCase() ?? ''
 export const FREE_DOMAINS = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.com.br', 'uol.com.br', 'bol.com.br', 'icloud.com', 'live.com', 'terra.com.br', 'ig.com.br', 'msn.com', 'proton.me', 'protonmail.com']
 export const TIPOS_LOTE = [['MISTO', 'Misto'], ['ADMISSAO', 'Admissão'], ['MENSAL', 'Mensal'], ['DESLIGAMENTO', 'Desligamento'], ['OCORRENCIAS', 'Ocorrências'], ['ARS', 'ARs']] as const
 export const MOTIVOS: Record<string, string> = {
+  ASSINATURA_NAO_VERIFICADA: 'Assinatura não verificada na imagem',
   BAIXA_CONFIANCA: 'Baixa confiança', PAGINA_ILEGIVEL: 'Página ilegível', MULTIPLOS_DOCUMENTOS: 'Mais de um documento', TIPO_OUTRO: 'Tipo não identificado',
   SEM_VINCULO: 'Sem vínculo', VINCULO_POR_NOME: 'Vínculo só por nome', ALERTA_ERRO: 'Alerta de erro', POSSIVEL_DUPLICATA: 'Possível duplicata', DIVISAO_MANUAL: 'Divisão manual',
   DADOS_DIVERGENTES: 'Dados divergentes', IMAGEM_BORRADA: 'Imagem borrada', REENVIO_SOLICITADO: 'Reenvio solicitado', EMPREGADOR_DIVERGENTE: 'Empregador divergente',

@@ -5,6 +5,7 @@ registrados em tempo de execução com `registrar_tipo`: o modelo nomeia o tipo 
 e as próximas páginas do mesmo tipo fecham na Camada 1, sem custo de modelo."""
 import os
 import re
+from functools import lru_cache
 import threading
 import unicodedata
 from typing import Dict, List, Optional
@@ -105,6 +106,14 @@ def _colado(s: str) -> str:
     return re.sub(r"\s+", "", s)
 
 
+@lru_cache(maxsize=4096)
+def _preparar_pista(p: str):
+    regex = re.compile(p) if p.startswith(r"\b") else None
+    colada = _colado(p) if regex is None and len(p) >= 14 else None
+    miolo = p[2:-2] if p.startswith(r"\b") and p.endswith(r"\b") and re.fullmatch(r"[A-Z ]+", p[2:-2]) else p
+    return regex, colada, 3 if len(miolo) > 12 else 1
+
+
 def pontuar(texto: str) -> Dict[str, int]:
     t = norm(texto)
     tc = _colado(t)  # o OCR cola ou parte palavras ("Recibode pagamento"): as pistas longas também são procuradas sem espaços
@@ -112,13 +121,10 @@ def pontuar(texto: str) -> Dict[str, int]:
     for cod, d in list(TIPOS.items()):  # cópia: a IA pode registrar um tipo novo em outra thread
         s = 0
         for p in d["pistas"]:
-            achou = bool(re.search(p if p.startswith(r"\b") else re.escape(p), t))
-            if not achou and not p.startswith(r"\b") and len(p) >= 14:
-                achou = _colado(p) in tc
-            if achou:
-                # peso 3 para pistas longas (mais específicas); numa palavra isolada (\bPALAVRA\b) o tamanho é o da palavra, sem os \b
-                miolo = p[2:-2] if p.startswith(r"\b") and p.endswith(r"\b") and re.fullmatch(r"[A-Z ]+", p[2:-2]) else p
-                s += 3 if len(miolo) > 12 else 1
+            regex, colada, peso = _preparar_pista(p)
+            achou = bool(regex.search(t)) if regex else p in t
+            if achou or (colada is not None and colada in tc):
+                s += peso
         if s:
             out[cod] = s
     return out

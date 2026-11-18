@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button, clsx } from '@/components/ui'
 
-export interface ViewPage { numero: number; url: string; thumb_url?: string; rotacao?: number }
+export interface ViewPage { numero: number; url: string; thumb_url?: string; rotacao?: number; pagina_origem?: number; regiao?: number; recorte?: number[] }
 export interface Highlight { numero: number; caixas: number[][] }
 
 /** Visualizador: páginas com zoom, girar e navegar; destaca o termo buscado usando as caixas do OCR. */
@@ -21,7 +21,7 @@ export function DocumentViewer({ pages, highlights = [], rotateRef }: { pages: V
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <Button size="sm" aria-label="Página anterior" disabled={i === 0} onClick={() => setI(i - 1)}><ChevronLeft className="h-4 w-4" /></Button>
-          <span className="px-2 text-sm text-muted-foreground" aria-live="polite">Página {p.numero} <span className="opacity-60">({i + 1}/{pages.length})</span></span>
+          <span className="px-2 text-sm text-muted-foreground" aria-live="polite">{p.pagina_origem ? `Folha ${p.pagina_origem}${p.recorte?.some((v, i) => v !== [0, 0, 1, 1][i]) ? ` · recorte ${p.regiao}` : ''}` : `Página ${p.numero}`} <span className="opacity-60">({i + 1}/{pages.length})</span></span>
           <Button size="sm" aria-label="Próxima página" disabled={i === pages.length - 1} onClick={() => setI(i + 1)}><ChevronRight className="h-4 w-4" /></Button>
         </div>
         <div className="flex items-center gap-1">

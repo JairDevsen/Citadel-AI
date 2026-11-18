@@ -35,12 +35,14 @@ Para produção, copie `.env.example` para `.env` e execute `make keys`: ele pre
 | `OPENAI_API_KEY` | liga o provedor OpenAI no IA Core; vazio = não usa | vazio | no `make dev`, coloque em `ia-core/.env.local` e reinicie; no Compose, configure no `.env`. Tem prioridade sobre a chave do Gemini |
 | `OPENAI_MODEL`, `OPENAI_MODEL_FALLBACK` | modelo padrão (visão) e modelo maior para páginas difíceis | `gpt-5-mini` / `gpt-5` | nomes não validados com chave real: confira em `GET /diagnostico` |
 | `OPENAI_MODEL_LITE` | modelo barato da Camada 2 (texto extraído, sem imagem) | `gpt-5-nano` | |
+| `IA_TEXT_MAX_CHARS` | limite de caracteres após compactar espaços para envio à Camada 2 | `12000` | mínimo 1000; acima dele a página segue inteira para visão, sem truncamento silencioso |
+| `IA_PRICES_BRL_PER_MILLION` | JSON com tarifas por modelo: `input`, `output`, `cached_input` opcional | `{}` | valores em BRL por milhão de tokens; modelo sem tarifa tem custo indisponível, não zero |
 | `OPENAI_REASONING_EFFORT` | opcional: `minimal`, `low`, `medium` ou `high` (só para modelos que aceitam) | vazio | menos esforço = respostas mais rápidas e baratas |
 | `OPENAI_BASE_URL` | opcional: endpoint compatível com a API da OpenAI (Azure, proxy interno) | vazio | |
 | `GEMINI_API_KEY` | liga o provedor Gemini no IA Core; vazio = não usa | vazio | no `make dev`, coloque em `ia-core/.env.local` e reinicie; no Compose, configure no `.env` |
 | `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACK` | modelo padrão e modelo maior para páginas difíceis | `gemini-3.5-flash` / `gemini-3.6-flash` | |
 | `GEMINI_MODEL_LITE` | modelo barato da Camada 2 (texto extraído, sem imagem) | `gemini-3.5-flash-lite` | |
-| `IA_IMAGE_MAX_PX` (ou `GEMINI_IMAGE_MAX_PX`) | lado máximo da imagem enviada ao modelo de visão (redução proporcional, WebP q=80) | `1024` | só a cópia enviada à IA é reduzida; o original fica guardado. Menos pixels = menos tokens, mas pior para manuscrito |
+| `IA_IMAGE_MAX_PX` (ou `GEMINI_IMAGE_MAX_PX`) | lado máximo da imagem enviada ao modelo de visão (redução proporcional, WebP q=80) | `1024` | assinatura e tipos visuais usam limite de pelo menos 1800; reserva em casos difíceis, 2200. Não amplia o original. Só a cópia enviada à IA é reduzida |
 | `IA_NITIDEZ_MIN` | limite de nitidez abaixo do qual uma imagem sem texto é tratada como **borrada** (variância do filtro de bordas) | `600` | heurística calibrada só com amostras sintéticas (texto nítido ≈ 2000, desfoque forte ≈ 400): **calibre com digitalizações reais** |
 | `IA_TINTA_MIN` | folha **em branco**: fração mínima de tinta agrupada no miolo da página (poeira, ruído, sombra de borda e furos não contam) | `0.0003` | medido: menor página real 0,0014; poeira ≤ 0,00004. Subir descarta mais folhas; calibre com digitalizações reais |
 | `IA_TINTA_MARCA` | folha com **só marca d'água/carimbo** ("AMOSTRA", "CÓPIA"): tinta abaixo disto e OCR só com a marca = em branco | `0.002` | menor página real medida: 0,0029 |

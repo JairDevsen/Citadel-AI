@@ -44,7 +44,7 @@ def validar(tipo: str, texto: str, campos: Dict, hoje: date = None) -> Tuple[Lis
                     alertas.append({"severidade": "erro", "codigo": "DOCUMENTO_VENCIDO", "mensagem": f"Documento vencido em {br}"})
         except ValueError:
             pass
-    if TIPOS.get(tipo, {}).get("assina") and not re.search(r"ASSINAD|ASSINATURA|RUBRICA", t):
+    if TIPOS.get(tipo, {}).get("assina") and campos.get("assinatura_detectada") is False:
         nc("DOCUMENTO_SEM_ASSINATURA", "Documento sem assinatura identificada")
     if tipo == "CARTAO_PONTO":
         m = re.search(r"JORNADA(?: DIARIA)?\s*[:\-]?\s*(\d{1,2}[:hH]\d{2})", t)
